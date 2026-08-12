@@ -1,0 +1,5 @@
+openai>=1.99.0
+python-dotenv>=1.0.1
+numpy>=1.26
+Pillow>=10.0
+projectaria-client-sdk

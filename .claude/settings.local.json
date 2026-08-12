@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:www.projectaria.com)",
+      "WebFetch(domain:arxiv.org)",
+      "Bash(grep -i \"^\\\\.git$\")"
+    ]
+  }
+}
