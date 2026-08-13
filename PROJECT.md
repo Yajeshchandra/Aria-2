@@ -105,7 +105,8 @@ Aria 2/
 | `PROBLEM-STATEMENT.md` | proposal-ready: the problem, the gap, RQ1–RQ4, scope, success criteria | writing the proposal or report |
 | `docs/design-after-mentor-answers.md` | what the mentor's answers changed, the three decisions they left to you, the egoEMOTION argument | before the next mentor meeting |
 | `docs/codebase-review-v5_1.md` | full code review, bugs, V6 build order | when you sit down to code |
-| `docs/egoEmotion.pdf` | the paper closest to this project | when you need its numbers |
+| `docs/egoEMOTION-paper-summary.md` | that paper digested: full result tables, which modalities to build, which to skip | deciding what to engineer next |
+| `docs/egoEmotion.pdf` | the paper itself | verifying a number before you quote it |
 | `docs/research-space-map.md` | the original exploration — 7 possible interpretations | mostly historical; 6 of the 7 are ruled out |
 | `docs/v5_1.md` | the original one-page summary of the system | superseded by the code review |
 
