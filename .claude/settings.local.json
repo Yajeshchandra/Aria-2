@@ -4,7 +4,8 @@
       "WebSearch",
       "WebFetch(domain:www.projectaria.com)",
       "WebFetch(domain:arxiv.org)",
-      "Bash(grep -i \"^\\\\.git$\")"
+      "Bash(grep -i \"^\\\\.git$\")",
+      "WebFetch(domain:github.com)"
     ]
   }
 }

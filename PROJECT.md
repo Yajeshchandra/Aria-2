@@ -1,31 +1,24 @@
 # PROJECT.md — read this when lost
 
-One page. Everything else is detail.
+One page. Everything else is detail. **If any other file disagrees with this one, check `HISTORY.md` first** — the project pivoted once already (2026-08-17) and some docs still describe the old design on purpose, as a record.
 
 ---
 
 ## What the project is
 
-People read an emotional first-person script out loud while wearing Meta Aria Gen 2 glasses.
-The glasses record their eyes, voice, heart rate, and head motion.
-Question: **can the glasses tell how the person felt?**
+People read short first-person story scenes on a screen, wearing Meta Aria Gen 2 glasses. Each scene ends in a decision: 4 options, each representing a different moral framing (care, fairness, loyalty, authority, sanctity — Moral Foundations Theory). They pick one, rate how sure they were, move to the next scene. Several scenes per story, several stories per person.
 
-That's it. No VR headset. No AI writing stories. The participant reads a script, the glasses watch.
+The glasses record their eyes, heart rate, and head motion the whole time — especially in the seconds before each click.
+
+Question: **can we build a picture of someone's moral profile from how they behaved and reacted while deciding — not just from which button they pressed?**
+
+No VR headset. No spoken answers — selection is by click. No AI writing the stories — those come from outside this project.
 
 ---
 
-## The three conditions
+## Why sensors at all
 
-| | What happens |
-|---|---|
-| **1** | Reads script, wearing Aria |
-| **2** | Reads script, no Aria |
-| **3** | No script, wearing Aria |
-
-- **1 vs 3** → does reading an emotional script change the signals? (this is where your ML data comes from)
-- **1 vs 2** → do the glasses change how people behave? (this is the honesty check)
-
-Everyone does all three.
+If the answer were "just tally which option each person picked," you wouldn't need Aria — that's a 4-button survey. The actual bet: two people can pick the same option, one instantly and one after visible struggle, and that struggle — pupil, heart rate, head motion, how long they hesitated — is invisible to the button press. The glasses are there to catch that.
 
 ---
 
@@ -33,59 +26,28 @@ Everyone does all three.
 
 A working system (V5.1) that:
 - connects to the glasses and streams data ✅
-- records eyes, heart rate (PPG), head motion, video, audio ✅
+- records eyes, heart rate (PPG), head motion, video ✅
 - saves everything to disk with a manifest ✅
 - shuts down cleanly ✅
 
-It's good. The hard plumbing is done.
-
----
-
-## What's wrong with it
-
-It's a **voice assistant** ("Hey Meta, what am I looking at?"). You need a **silent recorder**.
-
-Five things to fix:
-
-1. **It doesn't record long speech.** It only saves ~4-second clips when someone asks a question. A 10-minute reading produces zero audio files. ← biggest problem
-2. **No way to mark which condition you're in.** Sessions are just named by participant. Nothing says "this was condition 2."
-3. **The assistant talks back.** If it triggers mid-script, the glasses speak out loud into their own microphones. Must be turned off.
-4. **Possible clock bug.** Sensor summaries may be silently empty. Takes 10 minutes to check. Check it first.
-5. **Windows won't work.** The Aria SDK is Mac/Linux only. Collect on the Mac.
+The hard plumbing is done. It's currently shaped like a voice assistant ("Hey Meta, what am I looking at?"); it needs to become a silent recorder instead. See `ROADMAP.md` Goal 1 for exactly what changes.
 
 ---
 
 ## What's blocking you (not code)
 
 **IRB / ethics approval.** Nobody has started it. It takes weeks. The code takes days.
-This is your real deadline, not the software.
+This is still your real deadline, same as before the pivot.
 
 ---
 
-## Two things to tell your mentor
+## Still open
 
-**1. "Gaze dispersion" won't work.**
-They want to measure how your eyes wander around a room. But someone reading a script stares at the text. Their eyes aren't wandering.
+- **How many participants.** Never answered.
+- **Which tool shows the stories.** Requirement is just "QR codes + clean 4-option layout" — not picked yet.
+- **The stories themselves.** Coming from outside this project — nothing downstream can start until at least one arrives, correctly tagged.
 
-Instead measure how they read: how long they pause on words, how often they re-read, how fast they go, and how far their eyes run ahead of their voice. Better data, and only your setup can capture it.
-
-**2. Condition 3 should be a boring script, not silence.**
-Right now condition 3 is "say nothing." So when you compare it to condition 1, you can't tell if the difference came from the *emotion* or just from *talking*.
-
-If condition 3 is reading a neutral script instead, then the only difference is the emotion. Clean comparison.
-
----
-
-## Four things to do this week
-
-Each is small. None depend on each other.
-
-1. Run `python inspect_sensor_session.py` on an old session. Compare the manifest counts to `samples_in_window` in a query snapshot. If counts are big but `samples_in_window` is 0 → that's the clock bug.
-2. Send one email: **who approves human studies here?**
-3. Check whether microphone channel 7 is the nosepad contact mic or just the loudest regular mic.
-4. Confirm you're collecting on the Mac.
-
-**And ask your mentor: how many participants?** They never said. It decides whether this is a pilot or a real study.
+Full list with owners: `PROBLEM-STATEMENT.md` §8.
 
 ---
 
@@ -94,26 +56,33 @@ Each is small. None depend on each other.
 ```
 Aria 2/
 ├── PROJECT.md                          ← you are here
-├── PROBLEM-STATEMENT.md                ← the formal write-up
+├── PROBLEM-STATEMENT.md                ← the formal write-up (current design)
+├── HISTORY.md                          ← what changed, when, and why
+├── ROADMAP.md                          ← the 3 goals: build, collect, infer
+├── design/
+│   ├── HLD.md                          ← system architecture
+│   └── LLD.md                          ← schemas, formats, what's still TBD
 ├── aria_gen2_watch_and_tell_latest_v5_1/   ← the code (V5.1)
-└── docs/                               ← everything else
+└── docs/                               ← reference material
 ```
 
 | File | What's in it | When to open it |
 |---|---|---|
 | `PROJECT.md` | this page | when lost |
-| `PROBLEM-STATEMENT.md` | proposal-ready: the problem, the gap, RQ1–RQ4, scope, success criteria | writing the proposal or report |
-| `docs/design-after-mentor-answers.md` | what the mentor's answers changed, the three decisions they left to you, the egoEMOTION argument | before the next mentor meeting |
-| `docs/codebase-review-v5_1.md` | full code review, bugs, V6 build order | when you sit down to code |
-| `docs/egoEMOTION-paper-summary.md` | that paper digested: full result tables, which modalities to build, which to skip | deciding what to engineer next |
+| `PROBLEM-STATEMENT.md` | the problem, the gap, RQ1–RQ4, scope, success criteria — **current design** | writing the proposal or report |
+| `HISTORY.md` | the pivot, and everything superseded by it | before trusting an older doc |
+| `ROADMAP.md` | 3 goals — build the codebase, run the study, do the ML — as checklists | picking what to do next |
+| `design/HLD.md` | how the pieces fit together: Aria, the story tool, QR sync, feature extraction, modeling | before building or explaining the system |
+| `design/LLD.md` | exact data formats, the QR schema, the foundation-tagging schema, what's engineering-done vs. research-open | when you sit down to code or brief the content team |
+| `docs/codebase-review-v5_1.md` | full V5.1 code review, bugs, code-quality notes | still current for engineering, superseded for study design |
+| `docs/egoEMOTION-paper-summary.md` | closest prior paper, full result tables, which modalities work | deciding what to engineer/analyze next |
+| `docs/IKS-vs-MFT.md` | does Moral Foundations Theory fit Indian ethics — where it does, where it doesn't | designing story content, picking the validation questionnaire |
 | `docs/egoEmotion.pdf` | the paper itself | verifying a number before you quote it |
-| `docs/research-space-map.md` | the original exploration — 7 possible interpretations | mostly historical; 6 of the 7 are ruled out |
-| `docs/v5_1.md` | the original one-page summary of the system | superseded by the code review |
+| `docs/design-after-mentor-answers.md`, `docs/research-space-map.md`, `docs/v5_1.md` | earlier design work, **now superseded** | historical only — see `HISTORY.md` |
 
 ---
 
 ## If you only remember one thing
 
-The code is further along than the study is.
-Stop building for a bit. Get IRB moving and get a participant count.
-Then build the silent recorder.
+Get IRB moving and get a participant count — both still true from before the pivot.
+Then: `ROADMAP.md` Goal 1, build the silent recorder.
