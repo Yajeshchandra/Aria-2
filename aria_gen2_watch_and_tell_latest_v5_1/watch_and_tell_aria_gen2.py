@@ -166,7 +166,7 @@ class StudyRecorderApp:
         self.device.start_streaming()
 
         print(f"[3/4] Starting receiver on 0.0.0.0:{self.args.port}")
-        server_config = sdk_gen2.ServerConfig()  # renamed from HttpServerConfig -- unverified, check if this errors
+        server_config = receiver.HttpServerConfig()
         server_config.address = "0.0.0.0"
         server_config.port = self.args.port
 
