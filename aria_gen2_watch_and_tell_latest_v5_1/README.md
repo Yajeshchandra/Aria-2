@@ -48,6 +48,21 @@ V4/V5.1 fixed a Q16 fixed-point audio decoding bug in a now-removed `AudioRingBu
 
 Requires macOS or Linux. The Project Aria Client SDK supports Mac Big Sur+, Fedora 36+ and Ubuntu 22.04+ on Python 3.10–3.12; there is no Windows build. `pyzbar` additionally needs the system `zbar` library (`brew install zbar` on macOS).
 
+**WSL2 works** as an Ubuntu 22.04 host, with two things set up first:
+
+1. **Mirrored networking**, so the glasses can reach WSL2 over the LAN (default WSL2 NAT networking isolates it). In `%UserProfile%\.wslconfig` on the Windows side:
+   ```ini
+   [wsl2]
+   networkingMode=mirrored
+   ```
+   then `wsl --shutdown` and restart. Verify with `ip addr` inside WSL2 — it should show the same IP as the Windows host's Wi-Fi adapter, not a separate NAT address.
+2. **Connect over Wi-Fi, not USB.** `DeviceClient` connects over USB by default, and WSL2 has no native USB passthrough without extra tooling (`usbipd-win`). Simpler path: pass `--ip-address` (see Run, below). Get the glasses' IP from the Mobile Companion App — Dashboard → tap Wi-Fi.
+
+Clone into the WSL-native filesystem rather than working through `/mnt/c/...` — noticeably faster:
+```bash
+git clone "/mnt/c/Users/<you>/Workspace/Aria 2" ~/Aria2
+```
+
 ```bash
 conda activate MetaAriaGlasses
 cd /path/to/aria_gen2_watch_and_tell_latest_v5_1
@@ -65,6 +80,12 @@ python -m pip install -r requirements.txt
 ```
 
 or set `WATCH_USER_ID` in `.env` and run without an argument. A participant/session ID is required — the recorder refuses to invent one, since a study session must be attributable to a known participant.
+
+**Over Wi-Fi (required on WSL2):** set `ARIA_IP_ADDRESS` before running, or pass `--ip-address` directly:
+```bash
+ARIA_IP_ADDRESS=192.168.1.42 ./run_record.sh P001
+```
+Without it, the recorder falls back to USB, which WSL2 cannot see.
 
 Type `q` then Enter to stop cleanly; `Ctrl+C` is also supported.
 

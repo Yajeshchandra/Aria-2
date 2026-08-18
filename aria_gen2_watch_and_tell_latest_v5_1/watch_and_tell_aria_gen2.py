@@ -137,6 +137,14 @@ class StudyRecorderApp:
         )
         if legacy_serial_config:
             config.device_serial = self.args.serial
+        if self.args.ip_address:
+            # DeviceClient connects over USB by default. Under WSL2 (no
+            # native USB passthrough without usbipd-win) or any headless
+            # capture box, connect over Wi-Fi instead by supplying the
+            # glasses' IP -- get it from the Mobile Companion App:
+            # Dashboard -> tap Wi-Fi.
+            config.ip_v4_address = self.args.ip_address
+            print(f"Connecting over Wi-Fi to {self.args.ip_address}")
         self.device_client.set_client_config(config)
 
         if self.args.serial and not legacy_serial_config and hasattr(sdk_gen2, "DeviceTarget"):
@@ -340,7 +348,13 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="V6 silent recorder for Meta Aria Gen 2 — moral-choice study"
     )
-    parser.add_argument("--serial", default="", help="Optional Aria Gen 2 serial number")
+    parser.add_argument("--serial", default="", help="Optional Aria Gen 2 serial number (USB connections)")
+    parser.add_argument(
+        "--ip-address",
+        default=os.getenv("ARIA_IP_ADDRESS", ""),
+        help="Glasses' IP address for Wi-Fi connection (Mobile Companion App -> Dashboard -> Wi-Fi). "
+        "Required under WSL2 -- no native USB passthrough. Falls back to USB when omitted.",
+    )
     parser.add_argument("--profile", default="profile9", help="Aria streaming profile")
     parser.add_argument("--port", type=int, default=6768, help="Streaming receiver port")
     parser.add_argument("--rotate-image", type=int, default=0, choices=(0, 90, 180, 270))

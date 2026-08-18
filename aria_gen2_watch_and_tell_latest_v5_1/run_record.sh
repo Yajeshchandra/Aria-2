@@ -11,6 +11,7 @@ fi
 python -u watch_and_tell_aria_gen2.py \
   --profile profile9 \
   --user-id "${1:-}" \
+  --ip-address "${ARIA_IP_ADDRESS:-}" \
   --rotate-image 0 \
   --qr-scan-interval-seconds 0.5 \
   --enable-sensors \
