@@ -1,78 +1,36 @@
-# Watch and Tell V5.1 — Meta Aria Gen 2 multimodal recorder
+# V6 — Meta Aria Gen 2 study recorder
 
-V5.1 is the reliability update to V5. It preserves the validated Aria audio, RGB, wake-word, sensor, VRS, and OpenAI pipeline while correcting shutdown, pointing-query routing, wake-phrase variants, sensor-prompt length, manifest finalization, and PPG quality screening.
+Silent, QR-synced recorder for the moral-choice study. Not a voice assistant — V5.1's wake-word detection, OpenAI Q&A loop, and text-to-speech are gone. See `../HISTORY.md` (2026-08-17) for why, and `../design/HLD.md` / `../design/LLD.md` for how this fits the rest of the system.
 
 ## What is recorded
 
-- Complete streamed session in VRS.
-- RGB images used for visual questions.
-- Channel-7 wearer-speech WAV files and transcripts.
-- OpenAI response JSON and interaction CSV.
-- Continuous decoded JSONL for every callback available in the installed SDK and selected profile: dual IMUs, eye gaze, hand pose, VIO, high-frequency VIO, barometer, magnetometer, GPS, phone location, PPG, Bluetooth/Wi-Fi beacons, and device calibration.
-- Per-question sensor snapshot JSON with latest values, session counts, dropped-event counts, and rolling summaries.
+- Complete streamed session in VRS — the authoritative raw record.
+- Continuous decoded JSONL for every sensor callback available in the installed SDK and selected profile: dual IMUs, eye gaze, VIO, barometer, magnetometer, GPS, phone location, PPG, Bluetooth/Wi-Fi beacons, device calibration.
+- A continuous `events` JSONL stream: one entry per detected QR code, giving the ground-truth timestamp for every scene/question page shown on the separate presentation tool. See `../design/LLD.md` §2–3 for the payload format.
 
-VRS remains the authoritative raw record. JSONL is the analysis-ready decoded record. A registered callback can still have zero samples when the selected profile or environment does not deliver that stream.
+Not recorded at the app level: no per-question audio/image artifacts, no interaction CSV — there are no questions anymore. Microphone audio still flows into VRS as part of the full sensor suite; nothing in this codebase processes it. Hand pose and high-frequency VIO are not registered — both existed only to support the old pointing/holding voice queries and feed nothing in the current feature plan.
 
-## V5.1 improvements
+A registered callback can still have zero samples when the selected profile or environment does not deliver that stream.
 
-### Clean shutdown and metadata integrity
+## Two clocks, used for different things
 
-The application stops device streaming, waits for native queues to drain, clears callbacks when the SDK exposes that method, stops the receiver, drains the JSONL queue, and finalizes the manifest. The manifest is also checkpointed every five seconds, so counts are retained even after an unexpected process failure.
+Every sensor event carries a device-reported `timestamp_ns` (may be boot-relative, not Unix-epoch, depending on the SDK build) and a host-reported `received_ns` (this machine's wall clock at the moment the event was recorded). Cross-stream windowing (snapshot cutoffs, QR-to-sensor alignment) uses `received_ns` exclusively, since comparing device timestamps across streams on different epochs was a real, confirmed bug. Precise within-stream timing (PPG sample-rate inference) still uses the device `timestamp_ns`, where host-side jitter would be the wrong thing to measure. `test_v5_1.py::test_mixed_clock_origin_windowing` exercises the exact scenario this fixes.
 
-In wake mode, type:
+## QR-based scene/question sync
 
-```text
-q
+The recorder scans the latest RGB frame for a QR code every `--qr-scan-interval-seconds` (default 0.5s). A new code (different from the last one seen) is logged as an `events` entry with the RGB frame's own device timestamp. The presentation tool's own response log records *what* was chosen; this stream records *when* each page was shown — see `design/HLD.md` §2.3 for why neither can do the other's job.
+
+Generate the QR codes for a set of pages:
+
+```bash
+python generate_qr.py pages.csv --out-dir qr_codes
 ```
 
-and press Enter for a clean stop. `Ctrl+C` remains supported.
+where `pages.csv` has columns `page_type,id` (e.g. `scene,story_03_scene_2`).
 
-### Pointing and holding questions
+## PPG research estimate
 
-The following queries now always include the latest RGB frame and gaze crop:
-
-```text
-What am I pointing at?
-What am I holding?
-What is in my right hand?
-```
-
-Hand tracking stores confidence, wrist position, palm position, and palm/wrist normals when those fields are available. Object identification remains approximate unless a calibrated hand-ray-to-camera projection is added later.
-
-### Wake-word variants
-
-The system accepts a narrow set of observed transcription variants only after “Hey”:
-
-```text
-Hey Meta
-Hey Mera
-Hey Mana
-Hey Mehta
-Hey Metta
-Hey Meter
-```
-
-This improves recall without treating arbitrary speech as a wake request.
-
-### Concise model sensor context
-
-Raw VIO JSON is saved to the sensor snapshot but is not copied into the OpenAI prompt. The model receives a context of at most 500 characters containing selected gaze, hand, pose, movement, PPG-status, and barometer fields.
-
-### Audio conversion check (carried over from V4)
-
-The SDK stream reports `int64` audio values such as `-1114112` and `1245184`. These equal `-17 * 65536` and `19 * 65536` — signed PCM samples stored with 16 shift bits. The conversion restores them with an arithmetic right shift by 16.
-
-Verify this at every startup. The banner must read:
-
-```text
-conversion=signed-q16-shift-int64
-```
-
-If it reports `signed-clipped-int64`, the conversion has fallen through to the clipping fallback and every negative sample is being mapped to +32767, producing an apparent ~31k RMS carrier that looks like audio and is not. Stop and fix before recording.
-
-### PPG research estimate
-
-PPG is continuously recorded. A pulse estimate is attempted only when:
+Unchanged from V5.1. PPG is continuously recorded. A pulse estimate is attempted only when:
 
 - at least 30 seconds of PPG are available;
 - the signal is non-flat;
@@ -80,94 +38,53 @@ PPG is continuously recorded. A pulse estimate is attempted only when:
 - the dominant spectral peak is within 42–180 bpm; and
 - spectral peak confidence exceeds the configured threshold.
 
-The result is explicitly research-only and is not a medical measurement. Rejected estimates retain a status such as `need_longer_window`, `rejected_due_to_motion`, or `low_spectral_confidence`.
+Explicitly research-only, not a medical measurement. Rejected estimates retain a status such as `need_longer_window`, `rejected_due_to_motion`, or `low_spectral_confidence`.
+
+## Audio conversion note (historical)
+
+V4/V5.1 fixed a Q16 fixed-point audio decoding bug in a now-removed `AudioRingBuffer` class — the SDK reported `int64` values like `-1114112` (`= -17 * 65536`), signed PCM with 16 shift bits, which a naive clip would have silently corrupted into a fake carrier signal. That code is gone because nothing in V6 processes live audio anymore (VRS captures it untouched). If audio processing is ever added back — e.g. a spoken end-of-session reflection — re-read this note before touching PCM conversion; the SDK-level dtype quirk is a hardware/SDK behavior, not specific to the deleted code.
 
 ## Setup
 
-Requires macOS or Linux. The Project Aria Client SDK supports Mac Big Sur+, Fedora 36+ and Ubuntu 22.04+ on Python 3.10–3.12; there is no Windows build.
+Requires macOS or Linux. The Project Aria Client SDK supports Mac Big Sur+, Fedora 36+ and Ubuntu 22.04+ on Python 3.10–3.12; there is no Windows build. `pyzbar` additionally needs the system `zbar` library (`brew install zbar` on macOS).
 
 ```bash
 conda activate MetaAriaGlasses
 cd /path/to/aria_gen2_watch_and_tell_latest_v5_1
-cp .env.example .env     # then set OPENAI_API_KEY
-chmod 600 .env
-chmod +x *.sh
+cp .env.example .env     # set WATCH_USER_ID / WATCH_DATA_DIR if not passing --user-id
 python -m pip install -r requirements.txt
 ./check_setup.sh
 ```
 
-`check_setup.sh` byte-compiles every module and runs both test files, so no separate compile step is needed.
-
-The `.env` should retain an empty transcription prompt:
-
-```properties
-OPENAI_API_KEY=YOUR_VALID_KEY
-OPENAI_MODEL=gpt-5.6
-OPENAI_TRANSCRIBE_MODEL=gpt-4o-transcribe
-OPENAI_TRANSCRIPTION_LANGUAGE=en
-OPENAI_TRANSCRIPTION_PROMPT=
-WATCH_USER_ID=P001
-WATCH_DATA_DIR=./data
-```
+`check_setup.sh` byte-compiles every module and runs the test suite, so no separate compile step is needed.
 
 ## Run
 
-Keyboard mode:
-
 ```bash
-./run_keyboard.sh
+./run_record.sh P001
 ```
 
-Suggested checks:
+or set `WATCH_USER_ID` in `.env` and run without an argument. A participant/session ID is required — the recorder refuses to invent one, since a study session must be attributable to a known participant.
 
-```text
-What is the capital of India?
-What is your name?
-What is this?
-What am I looking at?
-What am I pointing at?
-```
-
-Wake mode:
-
-```bash
-./run_wake.sh
-```
-
-Remain quiet during the three-second calibration. Then say the complete request continuously:
-
-```text
-Hey Meta, what is the capital of India?
-Hey Meta, what am I looking at?
-Hey Meta, what am I pointing at?
-```
-
-Type `q` and press Enter to stop cleanly.
+Type `q` then Enter to stop cleanly; `Ctrl+C` is also supported.
 
 ## Output layout
 
 ```text
 data/
-├── watch_and_tell_log.csv
-├── audio/
-├── images/
-├── responses/
 └── sensors/
     └── P001_YYYYMMDD_HHMMSS/
         ├── manifest.json
         ├── P001_..._all_streams.vrs/
         │   └── ...timestamp....vrs
-        ├── streams/
-        │   ├── imu_imu-left.jsonl
-        │   ├── imu_imu-right.jsonl
-        │   ├── eye_gaze.jsonl
-        │   ├── hand_pose.jsonl
-        │   ├── vio.jsonl
-        │   ├── vio_high_frequency.jsonl
-        │   ├── ppg.jsonl
-        │   └── ...
-        └── query_snapshots/
-            └── P001_<record-id>.json
+        └── streams/
+            ├── imu_imu-left.jsonl
+            ├── imu_imu-right.jsonl
+            ├── eye_gaze.jsonl
+            ├── vio.jsonl
+            ├── ppg.jsonl
+            ├── events.jsonl        ← QR detections, see design/LLD.md §3
+            └── ...
 ```
 
 ## Inspect the latest session
@@ -182,16 +99,13 @@ Inspect a specific session:
 python inspect_sensor_session.py data/sensors/P001_YYYYMMDD_HHMMSS
 ```
 
-The inspector displays callback availability, manifest counts, fallback JSONL counts when needed, dropped events, query snapshots, VRS files, clean-close status, and file sizes.
-
 ## Study-use checklist
 
 Before formal participant recording, verify:
 
 - `closed_cleanly: true` in `manifest.json`;
-- non-zero counts for required streams;
+- non-zero counts for every required stream, including `events`;
 - `dropped_jsonl_events` is empty or understood;
 - the VRS file exists and has a plausible size;
-- query snapshots and CSV sensor paths are present;
-- pointing answers are treated as approximate;
+- a real QR round-trip on the actual presentation tool, not just the synthetic test — confirm the recorder logs an event when a real page is shown;
 - PPG estimates are retained as research-only values with quality status.

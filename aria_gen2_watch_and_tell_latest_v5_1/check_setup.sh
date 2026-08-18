@@ -17,7 +17,7 @@ check_cmd aria_doctor
 check_cmd aria_gen2
 
 python - <<'PY' || fail=1
-mods = ["aria.sdk_gen2", "aria.stream_receiver", "openai", "numpy", "PIL", "dotenv"]
+mods = ["aria.sdk_gen2", "aria.stream_receiver", "numpy", "PIL", "dotenv", "qrcode", "pyzbar.pyzbar"]
 for name in mods:
     try:
         __import__(name)
@@ -29,18 +29,6 @@ PY
 
 if [[ -f .env ]]; then
   echo "[pass] .env exists"
-  python - <<'PY' || fail=1
-from pathlib import Path
-from dotenv import dotenv_values
-v = dotenv_values(Path('.env'))
-key = (v.get('OPENAI_API_KEY') or '').strip()
-print('[pass] OPENAI_API_KEY is present' if key else '[fail] OPENAI_API_KEY is empty')
-print('[info] OPENAI_MODEL =', v.get('OPENAI_MODEL') or '(default)')
-print('[info] OPENAI_TRANSCRIBE_MODEL =', v.get('OPENAI_TRANSCRIBE_MODEL') or '(default)')
-print('[info] OPENAI_TRANSCRIPTION_PROMPT is', 'set' if (v.get('OPENAI_TRANSCRIPTION_PROMPT') or '').strip() else 'empty (recommended)')
-if not key:
-    raise SystemExit(1)
-PY
 else
   echo "[fail] .env missing (copy .env.example to .env)"
   fail=1
@@ -50,12 +38,11 @@ fi
 python -m py_compile \
   watch_and_tell_aria_gen2.py \
   sensor_recorder.py \
+  generate_qr.py \
   inspect_sensor_session.py \
-  test_audio_conversion.py \
   test_v5_1.py || fail=1
 
-echo "--- Local conversion/sensor tests ---"
-python test_audio_conversion.py || fail=1
+echo "--- Local sync/sensor tests ---"
 python test_v5_1.py || fail=1
 
 if lsof -nP -iTCP:6768 -sTCP:LISTEN >/dev/null 2>&1; then

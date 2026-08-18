@@ -165,6 +165,7 @@ def _timestamp_ns(payload: Any) -> int:
 class SensorEvent:
     stream: str
     timestamp_ns: int
+    received_ns: int
     received_utc: str
     payload: dict[str, Any]
     device_id: Optional[str] = None
@@ -362,22 +363,37 @@ class SensorRecorder:
         self._write_manifest()
 
     def record(self, stream: str, payload: dict[str, Any], timestamp_ns: Optional[int] = None, device_id: Optional[str] = None) -> None:
+        """Record one sensor event.
+
+        Two clocks are kept deliberately separate. ``timestamp_ns`` is the
+        device-reported capture time when the SDK supplies one (e.g.
+        ``capture_timestamp_ns``), which may be boot-relative rather than
+        Unix-epoch depending on the callback and SDK build. ``received_ns``
+        is always this host's wall clock at the moment the event was
+        recorded. Windowing/cutoff decisions below use ``received_ns``
+        exclusively so they stay correct regardless of what epoch the
+        device clock uses; ``timestamp_ns`` is preserved for analyses that
+        need precise device-side deltas (e.g. PPG sample-rate inference in
+        ``_experimental_bpm``), where host-side network/processing jitter
+        would be the wrong thing to measure.
+        """
         if not self._accepting:
             return
-        ts = int(timestamp_ns or _now_ns())
+        received_ns = _now_ns()
+        ts = int(timestamp_ns) if timestamp_ns is not None else received_ns
         safe = _to_jsonable(payload)
         if not isinstance(safe, dict):
             safe = {"value": safe}
         with self._lock:
-            self._latest[stream] = {"timestamp_ns": ts, "payload": copy.deepcopy(safe)}
+            self._latest[stream] = {"timestamp_ns": ts, "received_ns": received_ns, "payload": copy.deepcopy(safe)}
             self._counts[stream] += 1
             hist = self._history[stream]
-            hist.append((ts, copy.deepcopy(safe)))
-            cutoff = ts - int(self.rolling_seconds * 1e9)
+            hist.append((received_ns, ts, copy.deepcopy(safe)))
+            cutoff = received_ns - int(self.rolling_seconds * 1e9)
             while hist and hist[0][0] < cutoff:
                 hist.popleft()
         if self.enabled:
-            event = SensorEvent(stream, ts, _iso_utc(), safe, device_id)
+            event = SensorEvent(stream, ts, received_ns, _iso_utc(), safe, device_id)
             try:
                 self._q.put_nowait(event)
             except queue.Full:
@@ -393,7 +409,7 @@ class SensorRecorder:
             counts = dict(self._counts)
             dropped = dict(self._dropped)
             history = {
-                stream: [(ts, copy.deepcopy(payload)) for ts, payload in rows if ts >= cutoff]
+                stream: [(ts, copy.deepcopy(payload)) for received_ns, ts, payload in rows if received_ns >= cutoff]
                 for stream, rows in self._history.items()
             }
         return {
@@ -572,104 +588,16 @@ class SensorRecorder:
         })
         return result
 
-    @staticmethod
-    def _numbers(value: Any, limit: int = 3) -> list[float]:
-        found: list[float] = []
-        def walk(item: Any) -> None:
-            if len(found) >= limit:
-                return
-            if isinstance(item, (int, float)) and math.isfinite(float(item)):
-                found.append(float(item))
-            elif isinstance(item, dict):
-                for child in item.values():
-                    walk(child)
-                    if len(found) >= limit:
-                        return
-            elif isinstance(item, (list, tuple)):
-                for child in item:
-                    walk(child)
-                    if len(found) >= limit:
-                        return
-        walk(value)
-        return found
-
-    @staticmethod
-    def _fmt(value: Any, digits: int = 3) -> str:
-        try:
-            return f"{float(value):.{digits}f}"
-        except (TypeError, ValueError):
-            return "n/a"
-
-    def model_context(self, snapshot: dict[str, Any], max_chars: int = 500) -> str:
-        latest = snapshot.get("latest", {})
-        summaries = snapshot.get("summaries", {})
-        parts: list[str] = []
-
-        gaze = latest.get("eye_gaze", {}).get("payload")
-        if gaze:
-            parts.append(
-                f"Gaze yaw={self._fmt(gaze.get('yaw'))} rad, "
-                f"pitch={self._fmt(gaze.get('pitch'))} rad, "
-                f"depth={self._fmt(gaze.get('depth'), 2)} m."
-            )
-
-        hand = latest.get("hand_pose", {}).get("payload")
-        if hand:
-            left = hand.get("left_hand") is not None
-            right = hand.get("right_hand") is not None
-            parts.append(f"Hands detected: left={left}, right={right}.")
-
-        vio = latest.get("vio", {}).get("payload")
-        if vio:
-            pose = vio.get("pose") or {}
-            translation = self._numbers(pose.get("translation") if isinstance(pose, dict) else pose, 3)
-            rotation = self._numbers(pose.get("rotation_log") if isinstance(pose, dict) else None, 3)
-            if translation:
-                parts.append("Head position=" + ",".join(self._fmt(v) for v in translation) + " m.")
-            if rotation:
-                parts.append("Head rotation-log=" + ",".join(self._fmt(v) for v in rotation) + " rad.")
-
-        imu_summaries = [value for key, value in summaries.items() if key.startswith("imu")]
-        movement = [value.get("movement_intensity") for value in imu_summaries if value.get("movement_intensity") is not None]
-        if movement:
-            parts.append(f"Head-motion RMS={float(np.mean(movement)):.3f} rad/s.")
-
-        ppg = summaries.get("ppg")
-        if ppg:
-            status = ppg.get("pulse_status", "recording")
-            if ppg.get("experimental_bpm") is not None:
-                parts.append(
-                    f"Research PPG estimate={ppg['experimental_bpm']} bpm "
-                    f"(confidence={ppg.get('pulse_confidence_0_1', 'n/a')}; non-medical)."
-                )
-            else:
-                parts.append(f"PPG recorded; pulse status={status} (non-medical).")
-
-        barometer = latest.get("barometer", {}).get("payload")
-        if barometer:
-            parts.append(
-                f"Pressure={self._fmt(barometer.get('pressure'), 1)} Pa; "
-                f"temperature={self._fmt(barometer.get('temperature'), 1)} C."
-            )
-
-        selected: list[str] = []
-        length = 0
-        for part in parts:
-            extra = len(part) + (1 if selected else 0)
-            if length + extra > max_chars:
-                break
-            selected.append(part)
-            length += extra
-        return " ".join(selected)
-
     # ---- callback factories -------------------------------------------------
+    # Hand pose and high-frequency VIO are deliberately not registered here:
+    # both existed to support the old pointing/holding voice-assistant
+    # queries (V5.1) and neither feeds any feature in design/LLD.md's
+    # decision-window feature table for the current study.
     def callbacks(self) -> dict[str, Callable[..., None]]:
         return {
             "register_imu_callback": self._imu_callback,
             "register_eye_gaze_callback": self._eye_gaze_callback,
-            "register_hand_pose_callback": self._hand_pose_callback,
             "register_vio_callback": self._vio_callback,
-            "register_vio_high_frequency_callback": self._vio_hf_callback,
             "register_barometer_callback": self._barometer_callback,
             "register_magnetometer_callback": self._magnetometer_callback,
             "register_gps_callback": self._gps_callback,
@@ -691,7 +619,6 @@ class SensorRecorder:
             "accel_msec2": _vector(_get(motion_data, "accel_msec2", "accel_m_s2", "accelerometer")),
             "gyro_radsec": _vector(_get(motion_data, "gyro_radsec", "gyro_rad_s", "gyroscope")),
             "temperature": _get(motion_data, "temperature"),
-            "raw": _to_jsonable(motion_data),
         }
         self.record(f"imu_{sensor_label}", payload, _timestamp_ns(motion_data), self._device_id(kwargs))
 
@@ -700,32 +627,8 @@ class SensorRecorder:
             "yaw": _get(data, "yaw"), "pitch": _get(data, "pitch"), "depth": _get(data, "depth"),
             "vergence_left_yaw": _get(data, "vergence_left_yaw"),
             "vergence_right_yaw": _get(data, "vergence_right_yaw"),
-            "raw": _to_jsonable(data),
         }
         self.record("eye_gaze", payload, _timestamp_ns(data), self._device_id(kwargs))
-
-    @staticmethod
-    def _hand_summary(hand: Any) -> Optional[dict[str, Any]]:
-        if hand is None:
-            return None
-        normals = _get(hand, "wrist_and_palm_normal_device")
-        return {
-            "confidence": _get(hand, "confidence"),
-            "wrist_position_device": _vector(_get(hand, "get_wrist_position_device", "wrist_position_device")),
-            "palm_position_device": _vector(_get(hand, "get_palm_position_device", "palm_position_device")),
-            "wrist_normal_device": _vector(_get(normals, "wrist_normal_device")) if normals is not None else None,
-            "palm_normal_device": _vector(_get(normals, "palm_normal_device")) if normals is not None else None,
-        }
-
-    def _hand_pose_callback(self, data: Any, **kwargs: Any) -> None:
-        left_raw = _get(data, "left_hand", "left_hand_pose")
-        right_raw = _get(data, "right_hand", "right_hand_pose")
-        payload = {
-            "left_hand": self._hand_summary(left_raw),
-            "right_hand": self._hand_summary(right_raw),
-            "raw": _to_jsonable(data),
-        }
-        self.record("hand_pose", payload, _timestamp_ns(data), self._device_id(kwargs))
 
     def _vio_callback(self, data: Any, **kwargs: Any) -> None:
         pose = _get(data, "transform_odometry_bodyimu", "transform_odometry_device", "pose")
@@ -734,20 +637,15 @@ class SensorRecorder:
             "velocity_device": _vector(_get(data, "velocity_device", "linear_velocity", "velocity")),
             "angular_velocity_device": _vector(_get(data, "angular_velocity_device", "angular_velocity")),
             "gravity_odometry": _vector(_get(data, "gravity_odometry")),
-            "raw": _to_jsonable(data),
         }
         self.record("vio", payload, _timestamp_ns(data), self._device_id(kwargs))
 
-    def _vio_hf_callback(self, data: Any, **kwargs: Any) -> None:
-        payload = {"raw": _to_jsonable(data)}
-        self.record("vio_high_frequency", payload, _timestamp_ns(data), self._device_id(kwargs))
-
     def _barometer_callback(self, data: Any, **kwargs: Any) -> None:
-        payload = {"pressure": _get(data, "pressure"), "temperature": _get(data, "temperature"), "raw": _to_jsonable(data)}
+        payload = {"pressure": _get(data, "pressure"), "temperature": _get(data, "temperature")}
         self.record("barometer", payload, _timestamp_ns(data), self._device_id(kwargs))
 
     def _magnetometer_callback(self, data: Any, sensor_label: str = "magnetometer", **kwargs: Any) -> None:
-        payload = {"sensor_label": str(sensor_label), "mag_tesla": _vector(_get(data, "mag_tesla", "magnetic_field")), "raw": _to_jsonable(data)}
+        payload = {"sensor_label": str(sensor_label), "mag_tesla": _vector(_get(data, "mag_tesla", "magnetic_field"))}
         self.record("magnetometer", payload, _timestamp_ns(data), self._device_id(kwargs))
 
     def _gps_callback(self, data: Any, **kwargs: Any) -> None:
@@ -757,12 +655,10 @@ class SensorRecorder:
         self.record("phone_location", _to_jsonable(data), _timestamp_ns(data), self._device_id(kwargs))
 
     def _ppg_callback(self, data: Any, **kwargs: Any) -> None:
-        raw_payload = _to_jsonable(data)
         value = _get(data, "value", "ppg", "signal")
         payload: dict[str, Any] = {
             "value": float(value) if isinstance(value, (int, float, np.generic)) else value,
             "sample_rate": _get(data, "sample_rate"),
-            "raw": raw_payload,
         }
         self.record("ppg", payload, _timestamp_ns(data), self._device_id(kwargs))
 

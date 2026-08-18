@@ -1,30 +1,12 @@
 from __future__ import annotations
 
-import ast
 import json
 import math
-import re
 import tempfile
 import time
 from pathlib import Path
 
 from sensor_recorder import SensorRecorder
-
-
-def load_main_constants() -> dict[str, object]:
-    source = Path(__file__).with_name("watch_and_tell_aria_gen2.py").read_text(encoding="utf-8")
-    tree = ast.parse(source)
-    wanted = {"WAKE_VARIANTS", "WAKE_PATTERN", "VISION_HINTS"}
-    nodes = []
-    for node in tree.body:
-        targets = []
-        if isinstance(node, ast.Assign):
-            targets = [target.id for target in node.targets if isinstance(target, ast.Name)]
-        if any(name in wanted for name in targets):
-            nodes.append(node)
-    namespace = {"re": re}
-    exec(compile(ast.Module(body=nodes, type_ignores=[]), "watch_and_tell_constants", "exec"), namespace)
-    return namespace
 
 
 def test_ppg_estimate() -> None:
@@ -60,8 +42,6 @@ def test_ppg_estimate() -> None:
     ppg = snapshot["summaries"]["ppg"]
     assert ppg["pulse_status"] == "research_estimate_available", ppg
     assert abs(ppg["experimental_bpm"] - bpm_expected) <= 2.0, ppg
-    context = recorder.model_context(snapshot)
-    assert len(context) <= 500
 
 
 def test_motion_rejection() -> None:
@@ -90,20 +70,47 @@ def test_motion_rejection() -> None:
     assert ppg["pulse_status"] == "rejected_due_to_motion", ppg
 
 
-def test_wake_variants_and_pointing_vision() -> None:
-    constants = load_main_constants()
-    pattern = constants["WAKE_PATTERN"]
-    for phrase in (
-        "Hey Meta, what is this?",
-        "Hey Mera, what am I pointing at?",
-        "Hey Mana what am I looking at?",
-        "Hey Mehta, what is your name?",
-    ):
-        assert pattern.search(phrase), phrase
-    assert not pattern.search("What am I pointing at?"), "Non-wake speech must not match"
-    hints = constants["VISION_HINTS"]
-    assert "what am i pointing at" in hints
-    assert "what am i holding" in hints
+def test_mixed_clock_origin_windowing() -> None:
+    """Device timestamps on a different epoch than host time must not break windowing.
+
+    Some Aria SDK builds/callbacks report boot-relative device timestamps
+    rather than Unix-epoch ones. Before the received_ns fix (sensor_recorder.py,
+    see HISTORY.md 2026-08-17), snapshot() compared these device timestamps
+    directly against a host-time cutoff, which could silently filter out
+    every sample while manifest.json still reported full counts. This test
+    injects device timestamps on an unrelated, small, boot-relative-looking
+    epoch and confirms the snapshot still reports the correct in-window
+    count, since windowing now keys off received_ns (host clock, captured
+    at record() call time), not the device-reported timestamp.
+    """
+    recorder = SensorRecorder(
+        base_dir=Path(tempfile.mkdtemp()),
+        user_id="TEST",
+        enabled=False,
+        rolling_seconds=45,
+    )
+    device_epoch_ns = 5_000_000_000  # ~5 seconds since an unrelated "boot" origin
+    for index in range(10):
+        recorder.record(
+            "barometer",
+            {"pressure": 90000 + index},
+            timestamp_ns=device_epoch_ns + index * 1_000_000_000,
+        )
+    snapshot = recorder.snapshot(10.0)
+    barometer = snapshot["summaries"]["barometer"]
+    assert barometer["samples_in_window"] == 10, barometer
+
+
+def test_qr_round_trip() -> None:
+    """Ground truth for every scene/question boundary depends on this round-tripping cleanly."""
+    import qrcode
+    from pyzbar.pyzbar import decode as decode_qr_codes
+
+    payload = "question:story_03_scene_2_q"
+    image = qrcode.make(payload).convert("RGB")
+    results = decode_qr_codes(image)
+    assert len(results) == 1, results
+    assert results[0].data.decode("utf-8") == payload
 
 
 def test_manifest_finalization() -> None:
@@ -129,6 +136,7 @@ def test_manifest_finalization() -> None:
 if __name__ == "__main__":
     test_ppg_estimate()
     test_motion_rejection()
-    test_wake_variants_and_pointing_vision()
+    test_mixed_clock_origin_windowing()
+    test_qr_round_trip()
     test_manifest_finalization()
-    print("V5.1 synthetic tests passed.")
+    print("V6 synthetic tests passed.")

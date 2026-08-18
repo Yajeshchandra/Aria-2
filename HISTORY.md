@@ -70,6 +70,24 @@ Researched whether MFT — now the chosen framework — is even appropriate for 
 
 `PROBLEM-STATEMENT.md` rewritten to match the current design (draft 2 supersedes draft 1). `design/HLD.md`, `design/LLD.md`, `ROADMAP.md`, and this file added.
 
+## 2026-08-17 — External chat dump reviewed
+
+A shared ChatGPT conversation (from "squarebracket," the V5.1 author, per the hardcoded path in the old README) was pasted in for review. Two genuinely useful findings, one thing flagged as a different, non-current study:
+
+- **Confirmed the clock-epoch bug independently.** Prior analysis of a real V5.1 session explicitly documented that device `timestamp_ns` "may not share the same origin across all streams" and recommended aligning on host-received time instead — upgrading this project's own B1 finding (`docs/codebase-review-v5_1.md`) from hypothesized risk to confirmed issue with a known fix.
+- **Got the exact `profile9` sensor rates** (dual IMU 800 Hz, PPG 128 Hz, eye gaze 30 Hz, RGB 5 Hz at 2560×1920, etc.) and, separately, a claim that **profile9 does not include raw eye-tracking camera video** — if true, this would remove pupil/blink/Fisherface features (`docs/egoEMOTION-paper-summary.md` Tier 1) from what's obtainable under this profile, not just from what's obtainable live vs. offline. Flagged as needing verification against real hardware, not yet confirmed.
+- **A separate "Meta Aria Moral Learning Study"** described in the same dump (Banyan Deer Jataka tale, AI-dialogue vs. matched-text vs. moral-cue-control, EEG + Aria, testing lesson *retention*) is a different, likely earlier or parallel study from the same lab — not the branching-choice/MFT design this project builds. Noted as probable lineage for "storytelling to study morality," not as something to build against.
+
+## 2026-08-17 — V6 built
+
+Wrote the code implementing everything decided above. `aria_gen2_watch_and_tell_latest_v5_1/` bumped to 6.0.0.
+
+- **Clock-epoch fix applied**, not just documented: `sensor_recorder.py`'s `record()` now captures a host-clock `received_ns` alongside the device `timestamp_ns`; all cross-stream windowing keys off `received_ns` only, while `timestamp_ns` is kept for within-stream precision work (PPG sample-rate inference) where it's the physically correct clock. A new test (`test_mixed_clock_origin_windowing`) injects timestamps on an unrelated epoch to prove the fix — the old test suite only ever exercised host-clock-consistent timestamps, which is exactly why B1 wasn't caught earlier.
+- **`watch_and_tell_aria_gen2.py` rewritten**, 1258 → ~330 lines, class renamed `StudyRecorderApp`: wake-word detection, the OpenAI Q&A loop, TTS, and all live audio-question capture removed. QR scanning added (`_scan_for_qr`, `run_record_mode`), logging detections through the existing generic JSONL writer — no new writer needed.
+- **`hand_pose`/`vio_high_frequency` callbacks and the duplicated `raw` JSON field removed from `sensor_recorder.py`** — the ponytail-audit cuts from 2026-08-12, applied.
+- New: `generate_qr.py`, `run_record.sh`. Removed: `run_keyboard.sh`, `run_wake.sh`, `test_audio_conversion.py` (subject no longer exists — the Q16 knowledge is preserved in `README.md` prose, not code).
+- Everything testable without the physical device passes: syntax compiles clean, all 5 synthetic tests pass, `generate_qr.py` verified end-to-end. **Not yet verified: anything requiring the Mac + glasses** — live callback registration, a full-length dry run, cross-stream sync in milliseconds, and the profile9-ET-video question above.
+
 ---
 
 ## Superseded — do not build against these
@@ -85,4 +103,4 @@ Kept for the reasoning trail, not current:
 | Three-condition with/without-Aria/no-storytelling structure | same | Superseded entirely; no-Aria control dropped, see above |
 | V6 build priority list centered on continuous WAV capture and forced-alignment transcription | `docs/codebase-review-v5_1.md` §5 | `ROADMAP.md` Goal 1 — QR/event logging replaces continuous-audio capture as the top engineering priority |
 
-The engineering findings in `docs/codebase-review-v5_1.md` that are **not** design-specific — the clock-epoch bug, the Windows/macOS platform split, the shutdown-ordering and PPG-estimator code quality — remain fully current and are not superseded by anything above.
+The engineering findings in `docs/codebase-review-v5_1.md` that are **not** design-specific — the Windows/macOS platform split, the shutdown-ordering and PPG-estimator code quality — remain fully current and are not superseded by anything above. The clock-epoch bug specifically has moved from *flagged* to *fixed* — see 2026-08-17, "V6 built," above; `docs/codebase-review-v5_1.md`'s B1 write-up is now a historical description of the bug, not a live risk.

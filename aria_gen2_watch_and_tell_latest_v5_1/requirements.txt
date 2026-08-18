@@ -1,5 +1,6 @@
-openai>=1.99.0
 python-dotenv>=1.0.1
 numpy>=1.26
 Pillow>=10.0
+qrcode>=7.4
+pyzbar>=0.1.9
 projectaria-client-sdk
