@@ -155,13 +155,18 @@ class StudyRecorderApp:
         print(f"Connected: {self.device.connection_id()}")
 
         print(f"[2/4] Starting stream with profile: {self.args.profile}")
-        streaming_config = sdk_gen2.HttpStreamingConfig()
+        streaming_config = sdk_gen2.StreamingConfig()
         streaming_config.profile_name = self.args.profile
+        # Default interface is USB (confirmed via `aria_gen2 streaming start --help`).
+        # Under WSL2 -- no USB passthrough -- streaming silently tried and failed over
+        # USB even though the control/pairing connection was over Wi-Fi. Force station
+        # mode explicitly (device joins the existing Wi-Fi network, same as this host).
+        streaming_config.streaming_interface = sdk_gen2.StreamingInterface.WifiStation
         self.device.set_streaming_config(streaming_config)
         self.device.start_streaming()
 
         print(f"[3/4] Starting receiver on 0.0.0.0:{self.args.port}")
-        server_config = sdk_gen2.HttpServerConfig()
+        server_config = sdk_gen2.ServerConfig()  # renamed from HttpServerConfig -- unverified, check if this errors
         server_config.address = "0.0.0.0"
         server_config.port = self.args.port
 

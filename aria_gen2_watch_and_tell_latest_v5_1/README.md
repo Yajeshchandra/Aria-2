@@ -46,7 +46,7 @@ V4/V5.1 fixed a Q16 fixed-point audio decoding bug in a now-removed `AudioRingBu
 
 ## Setup
 
-Requires macOS or Linux. The Project Aria Client SDK supports Mac Big Sur+, Fedora 36+ and Ubuntu 22.04+ on Python 3.10–3.12; there is no Windows build. `pyzbar` additionally needs the system `zbar` library (`brew install zbar` on macOS).
+Requires macOS or Linux. The Project Aria Client SDK supports Mac Big Sur+, Fedora 36+ and Ubuntu 22.04+ on Python 3.10–3.12; there is no Windows build. `pyzbar` additionally needs the system `zbar` shared library — `brew install zbar` on macOS, `sudo apt-get install -y libzbar0` on Ubuntu/Debian (including WSL2), `sudo dnf install -y zbar` on Fedora. The `pip install pyzbar` step succeeds either way; the import fails at runtime (`ImportError: Unable to find zbar shared library`) without it.
 
 **WSL2 works** as an Ubuntu 22.04 host, with two things set up first:
 
